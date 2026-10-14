@@ -56,16 +56,23 @@
   .strings span { flex: 1; text-align: center; padding: 4px 0; border-radius: 5px; background: #1a1b1f; font-size: 12px; color: var(--muted); }
   .strings span.near { background: #3a3d45; color: var(--text); }
   .strings span.ok { background: var(--accent); color: #111; }
+  .chordClick { cursor: zoom-in; }
+  .chordClick:hover { opacity: .8; }
+  #chordModal { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: none; align-items: center; justify-content: center; z-index: 20; padding: 16px; }
+  #chordModal.show { display: flex; }
+  #chordModal .box { background: var(--panel); border-radius: 14px; padding: 20px 24px; max-width: 100%; text-align: center; cursor: default; }
+  #chordModal .fingers { color: var(--muted); font-size: 14px; margin: 6px 0 14px; }
+  #chordModal .fingers b { color: var(--lh); }
 </style>
 </head>
 <body>
 <div class="top">
 <header>
-  <h1>🎸 Tabs</h1>
+  <h1>Tabs</h1>
   <select id="songSel"></select>
-  <button id="playBtn" class="primary">▶ Play</button>
-  <button id="stopBtn">■ Stop</button>
-  <button id="practiceBtn" title="La app escucha tu guitarra y avanza cuando tocas bien">🎯 Practicar con micro</button>
+  <button id="playBtn" class="primary">Play</button>
+  <button id="stopBtn">Stop</button>
+  <button id="practiceBtn" title="La app escucha tu guitarra y avanza cuando tocas bien">Practicar con micro</button>
   <label>BPM <input id="bpm" type="number" min="20" max="240"></label>
   <label>Velocidad
     <select id="speed"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select>
@@ -82,8 +89,8 @@
   <span style="flex:1"></span>
   <label>Mic <span class="level"><div id="pLevel"></div></span></label>
   <label>Exigencia <input id="pStrict" type="range" min="0" max="2" value="1" style="width:80px"></label>
-  <button id="pSkip">Saltar ⏭</button>
-  <button id="pHear">🔊 Escuchar</button>
+  <button id="pSkip">Saltar</button>
+  <button id="pHear">Escuchar</button>
 </div>
 </div>
 <main>
@@ -105,10 +112,16 @@
       <div class="meter"><div class="mid"></div><div class="needle" id="needle"></div></div>
       <div id="tunerInfo">Pulsa para activar el micrófono</div>
       <div class="strings" id="tunerStrings"></div>
-      <div style="margin-top:10px;text-align:center"><button id="tunerBtn">🎤 Activar afinador</button></div>
+      <div style="margin-top:10px;text-align:center"><button id="tunerBtn">Activar afinador</button></div>
     </div>
   </aside>
 </main>
+
+<div id="chordModal"><div class="box">
+  <div id="chordBig"></div>
+  <div class="fingers" id="chordFingers"></div>
+  <button id="chordHear">Escuchar</button> <button id="chordClose">Cerrar</button>
+</div></div>
 
 <script src="tabparser.js"></script>
 <script src="songs.js"></script>
@@ -253,7 +266,7 @@ function render() {
     // acordes debajo, alineados con la casilla donde cambian
     for (const i in (meas.chords || {})) {
       const c = song.chords[meas.chords[i]];
-      if (c) drawDiagram(svg, c, PAD_L + i * SLOT_W + 14, 152);
+      if (c) makeClickable(drawDiagram(svg, c, PAD_L + i * SLOT_W + 14, 152), meas.chords[i]);
     }
     score.appendChild(svg);
     base += n;
@@ -276,11 +289,45 @@ function setCursor(idx) {
   }
   if (practice) showWanted();
 }
+// ---------- Acorde ampliado ----------
+const FINGER_NAME = ['', 'índice', 'medio', 'anular', 'meñique'];
+const STRING_NAME = ['6ª', '5ª', '4ª', '3ª', '2ª', '1ª'];
+let modalKey = null;
+function makeClickable(g, key) {
+  // rectángulo transparente para que todo el diagrama sea clicable
+  el('rect', { x: -14, y: -32, width: 84, height: 92, fill: 'transparent' }, g);
+  g.classList.add('chordClick');
+  g.addEventListener('click', e => { e.stopPropagation(); openChord(key); });
+}
+function openChord(key) {
+  const c = song.chords[key]; if (!c) return;
+  modalKey = key;
+  const box = $('chordBig'); box.innerHTML = '';
+  const svg = el('svg', { width: 300, height: 330, viewBox: '0 0 300 330', style: 'max-width:100%;height:auto' }, box);
+  drawDiagram(svg, c, 95, 125, 3.6);
+  const parts = [];
+  c.frets.forEach((f, s) => {
+    if (f === 'x') return;
+    if (f === 0) parts.push(`${STRING_NAME[s]} al aire`);
+    else parts.push(`${STRING_NAME[s]} traste ${f}: <b>${c.fingers[s] || '?'}</b> ${FINGER_NAME[c.fingers[s]] || ''}`);
+  });
+  $('chordFingers').innerHTML = parts.join('<br>');
+  $('chordModal').classList.add('show');
+}
+function closeChord() { $('chordModal').classList.remove('show'); }
+$('chordClose').onclick = closeChord;
+$('chordModal').onclick = e => { if (e.target.id === 'chordModal') closeChord(); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeChord(); });
+$('chordHear').onclick = () => {
+  const c = song.chords[modalKey]; audio();
+  c.frets.forEach((f, s) => { if (typeof f === 'number') playNote(OPEN_MIDI[s] + f, ctx.currentTime + 0.05 + s * 0.04); });
+};
+
 function showChord(box, key) {
   box.innerHTML = '';
   const c = key && song.chords[key]; if (!c) return;
   const svg = el('svg', { width: 170, height: 150 }, box);
-  drawDiagram(svg, c, 42, 45, 1.6);
+  makeClickable(drawDiagram(svg, c, 42, 45, 1.6), key);
 }
 
 // ---------- Audio (Karplus-Strong) ----------
@@ -356,9 +403,9 @@ function play() {
   playIdx = cursor; nextTime = ctx.currentTime + 0.08;
   timer = setInterval(scheduler, 25); scheduler();
   requestAnimationFrame(draw);
-  $('playBtn').textContent = '⏸ Pausa';
+  $('playBtn').textContent = 'Pausa';
 }
-function pause() { playing = false; clearInterval(timer); timer = null; $('playBtn').textContent = '▶ Play'; }
+function pause() { playing = false; clearInterval(timer); timer = null; $('playBtn').textContent = 'Play'; }
 function stop() { pause(); setCursor(0); }
 function restart() { pause(); play(); }
 $('playBtn').onclick = () => playing ? pause() : play();
@@ -417,7 +464,7 @@ async function startPractice() {
   practice = true;
   pState = { rmsHist: [], ring: Array.from({ length: 10 }, () => new Float32Array(4096)), ringPos: 0, wait: -1, pre: null, lastOnset: 0 };
   slots.forEach(s => s.el.classList.remove('hit', 'miss'));
-  $('practiceBtn').classList.add('on'); $('practiceBtn').textContent = '🎯 Practicando… (parar)';
+  $('practiceBtn').classList.add('on'); $('practiceBtn').textContent = 'Practicando… (parar)';
   $('practiceBar').classList.add('show');
   $('pFb').textContent = '';
   if (!slots[cursor].notes.length) setCursor(nextPlayable(cursor));
@@ -427,7 +474,7 @@ async function startPractice() {
 function stopPractice() {
   if (!practice) return;
   practice = false;
-  $('practiceBtn').classList.remove('on'); $('practiceBtn').textContent = '🎯 Practicar con micro';
+  $('practiceBtn').classList.remove('on'); $('practiceBtn').textContent = 'Practicar con micro';
   $('practiceBar').classList.remove('show');
 }
 $('practiceBtn').onclick = () => practice ? stopPractice() : startPractice();
@@ -452,7 +499,7 @@ function goNext(hit) {
   sl.el.classList.remove('miss');
   if (hit) sl.el.classList.add('hit');
   const j = nextPlayable(cursor);
-  if (j < 0) { $('pFb').textContent = '🎉 ¡Canción terminada!'; $('pFb').className = 'fb ok'; stopPractice(); return; }
+  if (j < 0) { $('pFb').textContent = '¡Canción terminada!'; $('pFb').className = 'fb ok'; stopPractice(); return; }
   if (j <= cursor) slots.forEach(s => s.el.classList.remove('hit'));
   setCursor(j);
 }
@@ -557,10 +604,10 @@ function tunerLoop() {
   requestAnimationFrame(tunerLoop);
 }
 $('tunerBtn').onclick = async () => {
-  if (tunerOn) { tunerOn = false; $('tunerBtn').textContent = '🎤 Activar afinador'; return; }
+  if (tunerOn) { tunerOn = false; $('tunerBtn').textContent = 'Activar afinador'; return; }
   try {
     await getMic();
-    tunerOn = true; $('tunerBtn').textContent = '⏹ Parar afinador';
+    tunerOn = true; $('tunerBtn').textContent = 'Parar afinador';
     $('tunerInfo').textContent = 'Toca una cuerda…';
     tunerLoop();
   } catch (e) {
