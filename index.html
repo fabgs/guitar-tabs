@@ -14,6 +14,9 @@
   .top { position: sticky; top: 0; z-index: 5; }
   header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 16px; background: var(--panel); }
   header h1 { font-size: 18px; margin: 0 12px 0 0; }
+  header a.site { margin-left: auto; color: var(--muted); text-decoration: none; font-size: 14px; }
+  header a.site:hover { color: var(--accent); }
+  input[type=range] { padding: 0; accent-color: var(--accent); }
   button, select, input { background: #33363e; color: var(--text); border: 1px solid #44474f; border-radius: 6px; padding: 6px 10px; font: inherit; }
   button { cursor: pointer; }
   button.primary { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 600; }
@@ -82,6 +85,8 @@
   <label><input id="metro" type="checkbox"> Metrónomo</label>
   <label><input id="sound" type="checkbox" checked> Sonido</label>
   <label><input id="showLH" type="checkbox" checked> Dedos en el tab</label>
+  <label>Volumen <input id="volume" type="range" min="0" max="1" step="0.01" value="0.8" style="width:90px"></label>
+  <a class="site" href="https://fabgs.dev/" target="_blank" rel="noopener">fabgs.dev</a>
 </header>
 <div id="practiceBar">
   <span>Toca:</span><span class="want" id="pWant">–</span>
@@ -164,7 +169,11 @@ function loadSong(s) {
     meas.notes.forEach((str, i) => {
       if (meas.chords && meas.chords[i]) chordKey = meas.chords[i];
       const notes = str.trim() ? str.trim().split(/\s+/).map(parseNote) : [];
-      slots.push({ m, i, notes, chordKey, rh: meas.rh && meas.rh[i] });
+      // "soltar": todo al aire en cuerdas que el acorde tenía pisadas
+      const c = s.chords[chordKey];
+      const release = !!(c && notes.length && notes.every(n => n.f === 0) &&
+        notes.some(n => typeof c.frets[n.s] === 'number' && c.frets[n.s] > 0));
+      slots.push({ m, i, notes, chordKey, release, rh: meas.rh && meas.rh[i] });
     });
   });
   $('bpm').value = s.bpm;
@@ -174,7 +183,7 @@ function loadSong(s) {
 }
 
 // ---------- Render ----------
-const SLOT_W = 46, PAD_L = 18, TAB_TOP = 40, STR_GAP = 13;
+const SLOT_W = 46, CHORD_W = 78, PAD_L = 18, TAB_TOP = 40, STR_GAP = 13;
 const stringY = s => TAB_TOP + (5 - s) * STR_GAP;   // 1ª cuerda arriba
 
 function rhLabel(slot) {
@@ -237,15 +246,26 @@ function render() {
       score.appendChild(d);
     }
     const n = meas.notes.length;
-    const W = PAD_L + n * SLOT_W + 4, H = 225;
+    // ancho de cada casilla: si un acorde no cabe hasta el siguiente cambio, se ensanchan sus casillas
+    const ws = Array(n).fill(SLOT_W);
+    const chordAt = Object.keys(meas.chords || {}).map(Number);
+    const breaks = [...new Set([...chordAt, ...[...Array(n).keys()].filter(i => slots[base + i].release)])].sort((a, b) => a - b);
+    breaks.forEach((i, k) => {
+      if (!chordAt.includes(i)) return;
+      const j = k + 1 < breaks.length ? breaks[k + 1] : n;
+      const span = (j - i) * SLOT_W;
+      if (span < CHORD_W) for (let s = i; s < j; s++) ws[s] = CHORD_W / (j - i);
+    });
+    const xs = []; ws.reduce((acc, w, i) => (xs[i] = acc) + w, PAD_L);
+    const W = PAD_L + ws.reduce((a, b) => a + b, 0) + 4, H = 225;
     const svg = el('svg', { class: 'measure', width: W, height: H, viewBox: `0 0 ${W} ${H}` });
     el('text', { x: 2, y: 10, fill: '#9a9ca3', 'font-size': 10 }, svg, (m + 1) + (meas.repeat ? `  (${meas.repeat})` : ''));
     el('text', { x: 1, y: 28, fill: '#f0b44c', 'font-size': 9 }, svg, 'MD');
     el('text', { x: 1, y: 128, fill: '#6db3ff', 'font-size': 9 }, svg, 'MI');
     for (let i = 0; i < n; i++) {
-      const idx = base + i, x = PAD_L + i * SLOT_W;
+      const idx = base + i, x = xs[i];
       const g = el('g', { class: 'slot' }, svg);
-      el('rect', { class: 'hl', x, y: 14, width: SLOT_W, height: 98 }, g);
+      el('rect', { class: 'hl', x, y: 14, width: ws[i], height: 98 }, g);
       g.addEventListener('click', () => { setCursor(idx); if (playing) restart(); });
       slots[idx].el = g;
     }
@@ -253,7 +273,7 @@ function render() {
       el('line', { x1: PAD_L - 4, y1: stringY(s), x2: W - 4, y2: stringY(s), stroke: '#5a5e68' }, svg);
     el('line', { x1: W - 4, y1: stringY(5), x2: W - 4, y2: stringY(0), stroke: '#5a5e68', 'stroke-width': 1.5 }, svg);
     for (let i = 0; i < n; i++) {
-      const slot = slots[base + i], g = slot.el, cx = PAD_L + i * SLOT_W + SLOT_W / 2 - 3;
+      const slot = slots[base + i], g = slot.el, cx = xs[i] + ws[i] / 2 - 3;
       el('text', { x: cx, y: 28, 'text-anchor': 'middle', fill: '#f0b44c', 'font-size': 13, 'font-weight': 700, 'pointer-events': 'none' }, g, rhLabel(slot));
       slot.notes.forEach(note => {
         const y = stringY(note.s), txt = String(note.f);
@@ -264,14 +284,18 @@ function render() {
       });
     }
     // acordes debajo, alineados con la casilla donde cambian
-    // si dos acordes van muy seguidos, se dibujan más pequeños para que no se pisen
-    const at = Object.keys(meas.chords || {}).map(Number).sort((a, b) => a - b);
-    at.forEach((i, k) => {
-      const c = song.chords[meas.chords[i]]; if (!c) return;
-      const avail = ((k + 1 < at.length ? at[k + 1] : n + 0.4) - i) * SLOT_W;
-      const sc = Math.min(1, avail / 74);
-      makeClickable(drawDiagram(svg, c, PAD_L + i * SLOT_W + 14 * sc, 152 - 20 * (1 - sc), sc), meas.chords[i]);
+    chordAt.forEach(i => {
+      const c = song.chords[meas.chords[i]];
+      if (c) makeClickable(drawDiagram(svg, c, xs[i] + 14, 152), meas.chords[i]);
     });
+    // momentos en los que hay que levantar los dedos (cuerdas al aire)
+    for (let i = 0; i < n; i++) {
+      if (!slots[base + i].release) continue;
+      const cx = xs[i] + ws[i] / 2 - 3;
+      el('text', { x: cx, y: 150, 'text-anchor': 'middle', fill: '#6db3ff', 'font-size': 11, 'font-weight': 700 }, svg, '↑');
+      el('text', { x: cx, y: 163, 'text-anchor': 'middle', fill: '#6db3ff', 'font-size': 10.5, 'font-weight': 700 }, svg, 'soltar');
+      el('text', { x: cx, y: 175, 'text-anchor': 'middle', fill: '#9a9ca3', 'font-size': 9 }, svg, 'al aire');
+    }
     score.appendChild(svg);
     base += n;
   });
@@ -284,7 +308,7 @@ function setCursor(idx) {
   cursor = idx;
   const sl = slots[cursor]; if (!sl) return;
   sl.el.classList.add('on');
-  showChord($('nowChord'), sl.chordKey);
+  showChord($('nowChord'), sl.chordKey, sl.release);
   const next = slots.slice(cursor + 1).find(x => x.chordKey !== sl.chordKey) || slots.find(x => x.chordKey !== sl.chordKey);
   showChord($('nextChord'), next && next.chordKey);
   if (playing || practice) {
@@ -327,8 +351,12 @@ $('chordHear').onclick = () => {
   c.frets.forEach((f, s) => { if (typeof f === 'number') playNote(OPEN_MIDI[s] + f, ctx.currentTime + 0.05 + s * 0.04); });
 };
 
-function showChord(box, key) {
+function showChord(box, key, release) {
   box.innerHTML = '';
+  if (release) {
+    box.innerHTML = '<div style="height:150px;display:flex;flex-direction:column;justify-content:center;align-items:center;color:#6db3ff;font-weight:700;font-size:20px">↑ Soltar<span style="color:#9a9ca3;font-size:13px;font-weight:400">cuerdas al aire</span></div>';
+    return;
+  }
   const c = key && song.chords[key]; if (!c) return;
   const svg = el('svg', { width: 170, height: 150 }, box);
   makeClickable(drawDiagram(svg, c, 42, 45, 1.6), key);
@@ -337,11 +365,22 @@ function showChord(box, key) {
 // ---------- Audio (Karplus-Strong) ----------
 let ctx, playing = false, nextTime = 0, playIdx = 0, timer, visQueue = [];
 const bufCache = {};
+let master;   // volumen general: todo el sonido pasa por aquí
 function audio() {
-  ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+  if (!ctx) {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain();
+    master.gain.value = +$('volume').value;
+    master.connect(ctx.destination);
+  }
   ctx.resume();
   return ctx;
 }
+try { const v = localStorage.getItem('volume'); if (v !== null) $('volume').value = v; } catch (e) {}
+$('volume').oninput = () => {
+  if (master) master.gain.value = +$('volume').value;
+  try { localStorage.setItem('volume', $('volume').value); } catch (e) {}
+};
 function pluckBuffer(midi) {
   if (bufCache[midi]) return bufCache[midi];
   const sr = ctx.sampleRate, freq = 440 * Math.pow(2, (midi - 69) / 12);
@@ -360,14 +399,14 @@ function pluckBuffer(midi) {
 function playNote(midi, t, vol = 0.35) {
   const src = ctx.createBufferSource(); src.buffer = pluckBuffer(midi);
   const g = ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + 2.1);
-  src.connect(g).connect(ctx.destination); src.start(t); src.stop(t + 2.2);
+  src.connect(g).connect(master); src.start(t); src.stop(t + 2.2);
 }
 function playSlot(sl, t) { sl.notes.forEach((n, k) => playNote(OPEN_MIDI[n.s] + n.f, t + k * 0.012)); }
 function click(t, accent) {
   const o = ctx.createOscillator(), g = ctx.createGain();
   o.frequency.value = accent ? 1600 : 1000;
   g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
-  o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.06);
+  o.connect(g).connect(master); o.start(t); o.stop(t + 0.06);
 }
 const slotDur = () => 60 / (+$('bpm').value * +$('speed').value) / song.slotsPerBeat;
 
@@ -576,8 +615,14 @@ new ResizeObserver(() => document.documentElement.style.setProperty('--topH', to
 
 // ---------- Selector de canción ----------
 SONGS.forEach((s, i) => $('songSel').add(new Option(`${s.artist} — ${s.title}`, i)));
-$('songSel').onchange = e => { pause(); stopPractice(); loadSong(SONGS[+e.target.value]); };
-loadSong(SONGS[0]);
+$('songSel').onchange = e => {
+  pause(); stopPractice(); loadSong(SONGS[+e.target.value]);
+  try { localStorage.setItem('song', SONGS[+e.target.value].id); } catch (err) {}
+};
+let startSong = 0;
+try { startSong = Math.max(0, SONGS.findIndex(s => s.id === localStorage.getItem('song'))); } catch (e) {}
+$('songSel').value = startSong;
+loadSong(SONGS[startSong]);
 
 // ---------- Afinador ----------
 const TUNING = [
