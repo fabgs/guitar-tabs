@@ -36,6 +36,7 @@
   .meta { color: var(--muted); margin-bottom: 10px; }
   .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
   .legend b.rh { color: var(--rh); } .legend b.lh { color: var(--lh); } .legend b.tech { color: #c792ea; }
+  .meta .error { padding: 8px 12px; border-radius: 6px; background: #3a1f1f; color: var(--bad); font-weight: 600; }
   .meta .tuning { margin-top: 6px; display: inline-block; padding: 3px 10px; border-radius: 6px; background: #3a2f1c; color: var(--rh); font-weight: 600; }
   main > section { min-width: 0; }
   #score { display: flex; flex-wrap: wrap; overflow-x: auto; }
@@ -131,9 +132,6 @@
   <button id="chordHear">Escuchar</button> <button id="chordClose">Cerrar</button>
 </div></div>
 
-<script src="fingering.js"></script>
-<script src="tabparser.js"></script>
-<script src="songs/index.js"></script>
 <script>
 const STRINGS = ['E', 'A', 'D', 'G', 'B', 'e'];            // índice 0 = 6ª cuerda
 const OPEN_MIDI = [40, 45, 50, 55, 59, 64];
@@ -685,32 +683,46 @@ $('tunerBtn').onclick = async () => {
   }
 };
 
-// ---------- Canciones (una por archivo en songs/) ----------
-// Se cargan con <script> porque abriendo la página como archivo el navegador no deja leer .txt/.json
-function loadSongFiles() {
-  return Promise.all(SONG_FILES.map(name => new Promise(resolve => {
+// ---------- Scripts y canciones ----------
+// Se cargan con <script> porque abriendo la página como archivo el navegador no deja leer .txt/.json.
+// El ?v= evita que el navegador use una versión vieja guardada en caché (GitHub Pages la guarda 10 min)
+// mezclada con la nueva.
+const BUST = '?v=' + Date.now();
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
     const sc = document.createElement('script');
-    sc.src = `songs/${name}.js`;
+    sc.src = src + BUST;
     sc.onload = resolve;
-    sc.onerror = () => { console.warn(`No se pudo cargar songs/${name}.js`); resolve(); };
+    sc.onerror = () => reject(new Error(`No se pudo cargar ${src}`));
     document.head.appendChild(sc);
-  })));
+  });
+}
+function showError(msg) {
+  $('meta').innerHTML = '';
+  const b = document.createElement('div'); b.className = 'error'; b.textContent = msg;
+  $('meta').appendChild(b);
+}
+function showSong(s) {
+  try { loadSong(s); }
+  catch (e) { console.error(e); showError(`No se pudo mostrar «${s.title}»: ${e.message}`); }
 }
 
-// ---------- Selector de canción ----------
-loadSongFiles().then(() => {
-  // se cargan en paralelo: ordenarlas como en la lista
-  SONGS.sort((a, b) => SONG_FILES.indexOf(a.id) - SONG_FILES.indexOf(b.id));
-  SONGS.forEach((s, i) => $('songSel').add(new Option(`${s.artist} — ${s.title}`, i)));
-  $('songSel').onchange = e => {
-    pause(); stopPractice(); loadSong(SONGS[+e.target.value]);
-    try { localStorage.setItem('song', SONGS[+e.target.value].id); } catch (err) {}
-  };
-  let startSong = 0;
-  try { startSong = Math.max(0, SONGS.findIndex(s => s.id === localStorage.getItem('song'))); } catch (e) {}
-  $('songSel').value = startSong;
-  loadSong(SONGS[startSong]);
-});
+Promise.all(['fingering.js', 'tabparser.js', 'songs/index.js'].map(loadScript))
+  .then(() => Promise.all(SONG_FILES.map(name => loadScript(`songs/${name}.js`).catch(e => console.warn(e.message)))))
+  .then(() => {
+    // se cargan en paralelo: ordenarlas como en la lista
+    SONGS.sort((a, b) => SONG_FILES.indexOf(a.id) - SONG_FILES.indexOf(b.id));
+    SONGS.forEach((s, i) => $('songSel').add(new Option(`${s.artist} — ${s.title}`, i)));
+    $('songSel').onchange = e => {
+      pause(); stopPractice(); showSong(SONGS[+e.target.value]);
+      try { localStorage.setItem('song', SONGS[+e.target.value].id); } catch (err) {}
+    };
+    let startSong = 0;
+    try { startSong = Math.max(0, SONGS.findIndex(s => s.id === localStorage.getItem('song'))); } catch (e) {}
+    $('songSel').value = startSong;
+    showSong(SONGS[startSong]);
+  })
+  .catch(e => { console.error(e); showError(e.message); });
 </script>
 </body>
 </html>
