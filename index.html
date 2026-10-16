@@ -264,10 +264,14 @@ function render() {
       });
     }
     // acordes debajo, alineados con la casilla donde cambian
-    for (const i in (meas.chords || {})) {
-      const c = song.chords[meas.chords[i]];
-      if (c) makeClickable(drawDiagram(svg, c, PAD_L + i * SLOT_W + 14, 152), meas.chords[i]);
-    }
+    // si dos acordes van muy seguidos, se dibujan más pequeños para que no se pisen
+    const at = Object.keys(meas.chords || {}).map(Number).sort((a, b) => a - b);
+    at.forEach((i, k) => {
+      const c = song.chords[meas.chords[i]]; if (!c) return;
+      const avail = ((k + 1 < at.length ? at[k + 1] : n + 0.4) - i) * SLOT_W;
+      const sc = Math.min(1, avail / 74);
+      makeClickable(drawDiagram(svg, c, PAD_L + i * SLOT_W + 14 * sc, 152 - 20 * (1 - sc), sc), meas.chords[i]);
+    });
     score.appendChild(svg);
     base += n;
   });

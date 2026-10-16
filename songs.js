@@ -132,6 +132,12 @@ SONGS.push({
   artist: 'Lamp',
   bpm: 75,
   slotsPerBeat: 4,
+  // digitación de Martin Music Center (pensada para enlazar bien un acorde con el siguiente)
+  fingers: {
+    '3,x,x,0,0,2': [2, 0, 0, 0, 0, 1],   // Gmaj7: 2 en la 6ª, 1 en la 1ª
+    'x,4,x,0,0,0': [0, 2, 0, 0, 0, 0],   // C#m7b5: 2 en la 5ª
+    'x,3,x,0,3,x': [0, 2, 0, 0, 3, 0],   // Csus2: 2 en la 5ª, 3 en la 2ª
+  },
   notes: 'Tab de Ultimate Guitar: tabs.ultimate-guitar.com/tab/lamp/for-lovers-tabs-3862739',
   tab: `
 For Lovers (2004) by Lamp

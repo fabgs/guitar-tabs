@@ -143,6 +143,18 @@
     return ns.length > 0 && ns.every(n => frets[n.s] === n.f);
   }
 
+  function splitRuns(slots) {
+    const runs = [];
+    let run = [], shape = {};
+    for (const sl of slots) {
+      if (run.length && sl.some(n => shape[n.s] !== undefined && shape[n.s] !== n.f)) { runs.push(run); run = []; shape = {}; }
+      run.push(sl);
+      sl.forEach(n => shape[n.s] = n.f);
+    }
+    if (run.length) runs.push(run);
+    return runs;
+  }
+
   function parseAsciiTab(text) {
     const lines = text.split(/\r?\n/);
     const measures = [], chords = {};
@@ -174,14 +186,18 @@
       let cur = null, prevFrets = null;
       for (const g of halves) {
         if (!cur || cur.notes.length >= 8) { cur = { notes: [], chords: {} }; blockMeasures.push(cur); }
-        if (!(prevFrets && fitsShape(g, prevFrets))) {
-          const frets = shapeOf(g);
-          const key = frets.join(',');
-          if (!chords[key]) chords[key] = { name: nameChord(frets), frets, fingers: fingerShape(frets) };
-          cur.chords[cur.notes.length] = key;
-          prevFrets = frets;
+        // si dentro del medio compás una cuerda cambia de traste, es otra posición (p. ej. una melodía)
+        for (const run of splitRuns(g)) {
+          const allOpen = run.flat().every(n => n.f === 0) && prevFrets;   // soltar dedos: no hace falta diagrama nuevo
+          if (!allOpen && !(prevFrets && fitsShape(run, prevFrets))) {
+            const frets = shapeOf(run);
+            const key = frets.join(',');
+            if (!chords[key]) chords[key] = { name: nameChord(frets), frets, fingers: fingerShape(frets) };
+            cur.chords[cur.notes.length] = key;
+            prevFrets = frets;
+          }
+          run.forEach(sl => cur.notes.push(sl.map(n => STR[n.s] + n.f).join(' ')));
         }
-        g.forEach(sl => cur.notes.push(sl.map(n => STR[n.s] + n.f).join(' ')));
       }
       blocks.push({ section, measures: blockMeasures, reps, paren });
       section = null;
