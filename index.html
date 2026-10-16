@@ -35,8 +35,10 @@
   @media (max-width: 860px) { main { grid-template-columns: 1fr; } aside { order: -1; position: static; max-height: none; } }
   .meta { color: var(--muted); margin-bottom: 10px; }
   .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
-  .legend b.rh { color: var(--rh); } .legend b.lh { color: var(--lh); }
-  #score { display: flex; flex-wrap: wrap; }
+  .legend b.rh { color: var(--rh); } .legend b.lh { color: var(--lh); } .legend b.tech { color: #c792ea; }
+  .meta .tuning { margin-top: 6px; display: inline-block; padding: 3px 10px; border-radius: 6px; background: #3a2f1c; color: var(--rh); font-weight: 600; }
+  main > section { min-width: 0; }
+  #score { display: flex; flex-wrap: wrap; overflow-x: auto; }
   .section { flex-basis: 100%; font-weight: 700; color: var(--rh); margin: 14px 0 2px; font-size: 14px; letter-spacing: .03em; }
   svg.measure { display: block; }
   svg text { font-family: system-ui, sans-serif; }
@@ -104,6 +106,7 @@
     <div class="legend">
       <span><b class="rh">MD (mano derecha):</b> p = pulgar · i = índice · m = medio · a = anular</span>
       <span><b class="lh">MI (mano izquierda):</b> 1 = índice · 2 = medio · 3 = anular · 4 = meñique</span>
+      <span id="techLegend"><b class="tech">Técnicas:</b> h = hammer-on · p = pull-off · / \ = slide · b = bend · &lt;7&gt; = armónico</span>
       <span>Haz clic en una nota para empezar desde ahí. Espacio = play/pausa.</span>
     </div>
     <div id="score"></div>
@@ -155,19 +158,25 @@ function spanishName(name) {
 // ---------- Datos ----------
 let song, slots = [];   // slots: lista plana {m, i, notes:[{s,f}], chordKey}
 function parseNote(tok) {
-  return { s: STRINGS.indexOf(tok[0]), f: parseInt(tok.slice(1), 10) };
+  const m = tok.match(/^([EADGBe])(\d+)(.*)$/);
+  return { s: STRINGS.indexOf(m[1]), f: +m[2], t: m[3] };   // t: técnica (h, p, /, \, b, + armónico)
+}
+// altura real de una nota con la afinación de la canción (los armónicos suenan más agudos)
+const HARMONIC = { 12: 12, 7: 19, 5: 24, 4: 28, 3: 31, 19: 19, 24: 24 };
+function noteMidi(n) {
+  return song.open[n.s] + (n.t === '+' ? (HARMONIC[n.f] || n.f) : n.f);
 }
 function loadSong(s) {
   if (s.tab && !s.measures) {
-    const p = TabParser.parseAsciiTab(s.tab, { fingers: s.fingers });
-    s.measures = p.measures; s.chords = p.chords;
+    const p = TabParser.parseAsciiTab(s.tab, { fingers: s.fingers, tuning: s.tuning, grid: s.grid });
+    s.measures = p.measures; s.chords = p.chords; s.open = p.open;
   }
   song = s;
   slots = [];
   let chordKey = null;
   s.measures.forEach((meas, m) => {
     meas.notes.forEach((str, i) => {
-      if (meas.chords && meas.chords[i]) chordKey = meas.chords[i];
+      chordKey = meas.shapes[i];
       const notes = str.trim() ? str.trim().split(/\s+/).map(parseNote) : [];
       // "soltar": todo al aire en cuerdas que el acorde tenía pisadas
       const c = s.chords[chordKey];
@@ -178,6 +187,14 @@ function loadSong(s) {
   });
   $('bpm').value = s.bpm;
   $('meta').textContent = `${s.artist} — ${s.title} · ${s.bpm} BPM · ${s.notes || ''}`;
+  const standard = s.open.every((m, i) => m === OPEN_MIDI[i]);
+  if (!standard) {
+    const b = document.createElement('div'); b.className = 'tuning';
+    b.textContent = 'Afinación: ' + s.open.map(m => NOTE_ES[m % 12]).join(' · ') + '  (de 6ª a 1ª)';
+    $('meta').appendChild(b);
+  }
+  $('techLegend').style.display = slots.some(sl => sl.notes.some(n => n.t)) ? '' : 'none';
+  setTuner(s.open);
   render();
   setCursor(0);
 }
@@ -198,12 +215,18 @@ function lhFinger(slot, n) {
   return '';
 }
 
-function drawDiagram(parent, chord, x, y, scale = 1) {
-  const g = el('g', { transform: `translate(${x},${y}) scale(${scale})` }, parent);
-  const sx = 11, fy = 14, W = sx * 5, nFrets = 4;
+// traste inicial y número de trastes que hay que dibujar (4 como mínimo; más si la forma es más abierta)
+function diagramFrets(chord) {
   const fretted = chord.frets.filter(f => typeof f === 'number' && f > 0);
   const maxF = Math.max(...fretted, 0), minF = Math.min(...fretted);
   const start = maxF <= 4 ? 1 : minF;
+  return { start, n: Math.max(4, maxF - start + 1) };
+}
+
+function drawDiagram(parent, chord, x, y, scale = 1) {
+  const g = el('g', { transform: `translate(${x},${y}) scale(${scale})` }, parent);
+  const { start, n: nFrets } = diagramFrets(chord);
+  const sx = 11, fy = 14, W = sx * 5;
   el('text', { x: W / 2, y: -20, 'text-anchor': 'middle', fill: '#e8e8ea', 'font-size': 12, 'font-weight': 700 }, g, chord.name);
   el('text', { x: W / 2, y: -8, 'text-anchor': 'middle', fill: '#9a9ca3', 'font-size': 9.5 }, g, spanishName(chord.name));
   for (let s = 0; s < 6; s++) {
@@ -214,7 +237,7 @@ function drawDiagram(parent, chord, x, y, scale = 1) {
   }
   for (let i = 0; i <= nFrets; i++)
     el('line', { x1: 0, y1: i * fy, x2: W, y2: i * fy, stroke: '#888', 'stroke-width': i === 0 && start === 1 ? 3 : 1 }, g);
-  if (start > 1) el('text', { x: -5, y: fy * 0.7, 'text-anchor': 'end', fill: '#9a9ca3', 'font-size': 10 }, g, start);
+  if (start > 1) el('text', { x: -8, y: fy * 0.7, 'text-anchor': 'end', fill: '#9a9ca3', 'font-size': 10 }, g, start);
   // cejillas: mismo dedo, mismo traste, varias cuerdas
   const byFinger = {};
   chord.frets.forEach((f, s) => {
@@ -257,7 +280,8 @@ function render() {
       if (span < CHORD_W) for (let s = i; s < j; s++) ws[s] = CHORD_W / (j - i);
     });
     const xs = []; ws.reduce((acc, w, i) => (xs[i] = acc) + w, PAD_L);
-    const W = PAD_L + ws.reduce((a, b) => a + b, 0) + 4, H = 225;
+    const maxFrets = Math.max(4, ...chordAt.map(i => song.chords[meas.chords[i]] ? diagramFrets(song.chords[meas.chords[i]]).n : 4));
+    const W = PAD_L + ws.reduce((a, b) => a + b, 0) + 4, H = Math.max(225, 152 + 14 * maxFrets + 16);
     const svg = el('svg', { class: 'measure', width: W, height: H, viewBox: `0 0 ${W} ${H}` });
     el('text', { x: 2, y: 10, fill: '#9a9ca3', 'font-size': 10 }, svg, (m + 1) + (meas.repeat ? `  (${meas.repeat})` : ''));
     el('text', { x: 1, y: 28, fill: '#f0b44c', 'font-size': 9 }, svg, 'MD');
@@ -276,9 +300,11 @@ function render() {
       const slot = slots[base + i], g = slot.el, cx = xs[i] + ws[i] / 2 - 3;
       el('text', { x: cx, y: 28, 'text-anchor': 'middle', fill: '#f0b44c', 'font-size': 13, 'font-weight': 700, 'pointer-events': 'none' }, g, rhLabel(slot));
       slot.notes.forEach(note => {
-        const y = stringY(note.s), txt = String(note.f);
+        const y = stringY(note.s), txt = note.t === '+' ? `<${note.f}>` : String(note.f);
         el('rect', { x: cx - 4 * txt.length - 1, y: y - 7, width: 8 * txt.length + 2, height: 14, fill: '#1d1e22', 'pointer-events': 'none' }, g);
         el('text', { x: cx, y: y + 4.5, 'text-anchor': 'middle', fill: '#e8e8ea', 'font-size': 12, 'font-weight': 700, 'pointer-events': 'none' }, g, txt);
+        if (note.t && note.t !== '+')
+          el('text', { x: cx - 4 * txt.length - 2, y: y - 1, 'text-anchor': 'end', fill: '#c792ea', 'font-size': 9, 'font-weight': 700, 'pointer-events': 'none' }, g, note.t);
         const fing = showLH && lhFinger(slot, note);
         if (fing) el('text', { x: cx + 4 * txt.length + 2, y: y + 1, fill: '#6db3ff', 'font-size': 8.5, 'font-weight': 700, 'pointer-events': 'none' }, g, fing);
       });
@@ -333,7 +359,8 @@ function openChord(key) {
   const box = $('chordBig'); box.innerHTML = '';
   // el diagrama mide 55 de ancho; escalado y centrado, con margen para los puntos y el número de traste
   const SC = 3.6, VW = 320;
-  const svg = el('svg', { width: VW, height: 330, viewBox: `0 0 ${VW} 330`, style: 'max-width:100%;height:auto;display:block;margin:0 auto' }, box);
+  const VH = 135 + 14 * SC * diagramFrets(c).n;
+  const svg = el('svg', { width: VW, height: VH, viewBox: `0 0 ${VW} ${VH}`, style: 'max-width:100%;height:auto;display:block;margin:0 auto' }, box);
   drawDiagram(svg, c, (VW - 55 * SC) / 2, 125, SC);
   const parts = [];
   c.frets.forEach((f, s) => {
@@ -350,7 +377,7 @@ $('chordModal').onclick = e => { if (e.target.id === 'chordModal') closeChord();
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeChord(); });
 $('chordHear').onclick = () => {
   const c = song.chords[modalKey]; audio();
-  c.frets.forEach((f, s) => { if (typeof f === 'number') playNote(OPEN_MIDI[s] + f, ctx.currentTime + 0.05 + s * 0.04); });
+  c.frets.forEach((f, s) => { if (typeof f === 'number') playNote(song.open[s] + f, ctx.currentTime + 0.05 + s * 0.04); });
 };
 
 function showChord(box, key, release) {
@@ -360,7 +387,7 @@ function showChord(box, key, release) {
     return;
   }
   const c = key && song.chords[key]; if (!c) return;
-  const svg = el('svg', { width: 170, height: 150 }, box);
+  const svg = el('svg', { width: 170, height: 60 + 14 * 1.6 * diagramFrets(c).n }, box);
   makeClickable(drawDiagram(svg, c, 42, 45, 1.6), key);
 }
 
@@ -403,7 +430,7 @@ function playNote(midi, t, vol = 0.35) {
   const g = ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + 2.1);
   src.connect(g).connect(master); src.start(t); src.stop(t + 2.2);
 }
-function playSlot(sl, t) { sl.notes.forEach((n, k) => playNote(OPEN_MIDI[n.s] + n.f, t + k * 0.012)); }
+function playSlot(sl, t) { sl.notes.forEach((n, k) => playNote(noteMidi(n), t + k * 0.012)); }
 function click(t, accent) {
   const o = ctx.createOscillator(), g = ctx.createGain();
   o.frequency.value = accent ? 1600 : 1000;
@@ -550,8 +577,8 @@ function goNext(hit) {
 }
 function showWanted() {
   const sl = slots[cursor];
-  $('pWant').textContent = sl.notes.map(n => `${STRINGS[n.s]}${n.f}`).join(' ') +
-    '  (' + sl.notes.map(n => NOTE_ES[(OPEN_MIDI[n.s] + n.f) % 12]).join(', ') + ')';
+  $('pWant').textContent = sl.notes.map(n => `${6 - n.s}ª:${n.f}`).join('  ') +
+    '   (' + sl.notes.map(n => NOTE_ES[noteMidi(n) % 12]).join(', ') + ')';
 }
 
 function binLevel(spec, freq, binHz) {
@@ -571,7 +598,7 @@ function evaluate(spec, pre) {
   const strict = +$('pStrict').value;               // 0 suave · 1 normal · 2 exigente
   const margin = [16, 22, 28][strict];
   const sl = slots[cursor];
-  const want = [...new Set(sl.notes.map(n => OPEN_MIDI[n.s] + n.f))];
+  const want = [...new Set(sl.notes.map(noteMidi))];
   let hits = 0;
   for (const m of want) {
     const f = 440 * Math.pow(2, (m - 69) / 12);
@@ -615,23 +642,14 @@ function practiceLoop() {
 const topBox = document.querySelector('.top');
 new ResizeObserver(() => document.documentElement.style.setProperty('--topH', topBox.offsetHeight + 'px')).observe(topBox);
 
-// ---------- Selector de canción ----------
-SONGS.forEach((s, i) => $('songSel').add(new Option(`${s.artist} — ${s.title}`, i)));
-$('songSel').onchange = e => {
-  pause(); stopPractice(); loadSong(SONGS[+e.target.value]);
-  try { localStorage.setItem('song', SONGS[+e.target.value].id); } catch (err) {}
-};
-let startSong = 0;
-try { startSong = Math.max(0, SONGS.findIndex(s => s.id === localStorage.getItem('song'))); } catch (e) {}
-$('songSel').value = startSong;
-loadSong(SONGS[startSong]);
 
 // ---------- Afinador ----------
-const TUNING = [
-  { es: 'Mi (6ª)', f: 82.41 }, { es: 'La (5ª)', f: 110.0 }, { es: 'Re (4ª)', f: 146.83 },
-  { es: 'Sol (3ª)', f: 196.0 }, { es: 'Si (2ª)', f: 246.94 }, { es: 'Mi (1ª)', f: 329.63 },
-];
-TUNING.forEach(t => { const s = document.createElement('span'); s.textContent = t.es; $('tunerStrings').appendChild(s); });
+let TUNING = [];
+function setTuner(open) {
+  TUNING = open.map((m, i) => ({ es: `${NOTE_ES[m % 12]} (${6 - i}ª)`, f: 440 * Math.pow(2, (m - 69) / 12) }));
+  $('tunerStrings').innerHTML = '';
+  TUNING.forEach(t => { const s = document.createElement('span'); s.textContent = t.es; $('tunerStrings').appendChild(s); });
+}
 let tunerOn = false, history = [];
 function tunerLoop() {
   if (!tunerOn) return;
@@ -665,6 +683,17 @@ $('tunerBtn').onclick = async () => {
     $('tunerInfo').textContent = 'No se pudo abrir el micrófono: ' + e.message;
   }
 };
+
+// ---------- Selector de canción ----------
+SONGS.forEach((s, i) => $('songSel').add(new Option(`${s.artist} — ${s.title}`, i)));
+$('songSel').onchange = e => {
+  pause(); stopPractice(); loadSong(SONGS[+e.target.value]);
+  try { localStorage.setItem('song', SONGS[+e.target.value].id); } catch (err) {}
+};
+let startSong = 0;
+try { startSong = Math.max(0, SONGS.findIndex(s => s.id === localStorage.getItem('song'))); } catch (e) {}
+$('songSel').value = startSong;
+loadSong(SONGS[startSong]);
 </script>
 </body>
 </html>
