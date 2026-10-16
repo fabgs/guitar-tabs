@@ -331,8 +331,10 @@ function openChord(key) {
   const c = song.chords[key]; if (!c) return;
   modalKey = key;
   const box = $('chordBig'); box.innerHTML = '';
-  const svg = el('svg', { width: 300, height: 330, viewBox: '0 0 300 330', style: 'max-width:100%;height:auto' }, box);
-  drawDiagram(svg, c, 95, 125, 3.6);
+  // el diagrama mide 55 de ancho; escalado y centrado, con margen para los puntos y el número de traste
+  const SC = 3.6, VW = 320;
+  const svg = el('svg', { width: VW, height: 330, viewBox: `0 0 ${VW} 330`, style: 'max-width:100%;height:auto;display:block;margin:0 auto' }, box);
+  drawDiagram(svg, c, (VW - 55 * SC) / 2, 125, SC);
   const parts = [];
   c.frets.forEach((f, s) => {
     if (f === 'x') return;
