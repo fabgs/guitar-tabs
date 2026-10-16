@@ -133,7 +133,7 @@
 
 <script src="fingering.js"></script>
 <script src="tabparser.js"></script>
-<script src="songs.js"></script>
+<script src="songs/index.js"></script>
 <script>
 const STRINGS = ['E', 'A', 'D', 'G', 'B', 'e'];            // índice 0 = 6ª cuerda
 const OPEN_MIDI = [40, 45, 50, 55, 59, 64];
@@ -469,6 +469,7 @@ function draw() {
   requestAnimationFrame(draw);
 }
 function play() {
+  if (!song) return;   // las canciones aún se están cargando
   if (practice) stopPractice();
   audio();
   playing = true; visQueue = [];
@@ -684,16 +685,32 @@ $('tunerBtn').onclick = async () => {
   }
 };
 
+// ---------- Canciones (una por archivo en songs/) ----------
+// Se cargan con <script> porque abriendo la página como archivo el navegador no deja leer .txt/.json
+function loadSongFiles() {
+  return Promise.all(SONG_FILES.map(name => new Promise(resolve => {
+    const sc = document.createElement('script');
+    sc.src = `songs/${name}.js`;
+    sc.onload = resolve;
+    sc.onerror = () => { console.warn(`No se pudo cargar songs/${name}.js`); resolve(); };
+    document.head.appendChild(sc);
+  })));
+}
+
 // ---------- Selector de canción ----------
-SONGS.forEach((s, i) => $('songSel').add(new Option(`${s.artist} — ${s.title}`, i)));
-$('songSel').onchange = e => {
-  pause(); stopPractice(); loadSong(SONGS[+e.target.value]);
-  try { localStorage.setItem('song', SONGS[+e.target.value].id); } catch (err) {}
-};
-let startSong = 0;
-try { startSong = Math.max(0, SONGS.findIndex(s => s.id === localStorage.getItem('song'))); } catch (e) {}
-$('songSel').value = startSong;
-loadSong(SONGS[startSong]);
+loadSongFiles().then(() => {
+  // se cargan en paralelo: ordenarlas como en la lista
+  SONGS.sort((a, b) => SONG_FILES.indexOf(a.id) - SONG_FILES.indexOf(b.id));
+  SONGS.forEach((s, i) => $('songSel').add(new Option(`${s.artist} — ${s.title}`, i)));
+  $('songSel').onchange = e => {
+    pause(); stopPractice(); loadSong(SONGS[+e.target.value]);
+    try { localStorage.setItem('song', SONGS[+e.target.value].id); } catch (err) {}
+  };
+  let startSong = 0;
+  try { startSong = Math.max(0, SONGS.findIndex(s => s.id === localStorage.getItem('song'))); } catch (e) {}
+  $('songSel').value = startSong;
+  loadSong(SONGS[startSong]);
+});
 </script>
 </body>
 </html>
