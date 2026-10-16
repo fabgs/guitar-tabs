@@ -128,6 +128,7 @@
   <button id="chordHear">Escuchar</button> <button id="chordClose">Cerrar</button>
 </div></div>
 
+<script src="fingering.js"></script>
 <script src="tabparser.js"></script>
 <script src="songs.js"></script>
 <script>
@@ -158,9 +159,8 @@ function parseNote(tok) {
 }
 function loadSong(s) {
   if (s.tab && !s.measures) {
-    const p = TabParser.parseAsciiTab(s.tab);
+    const p = TabParser.parseAsciiTab(s.tab, { fingers: s.fingers });
     s.measures = p.measures; s.chords = p.chords;
-    for (const k in (s.fingers || {})) if (s.chords[k]) s.chords[k].fingers = s.fingers[k];
   }
   song = s;
   slots = [];

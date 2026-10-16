@@ -3,7 +3,7 @@
 // - Cada grupo de notas separadas por 2 guiones = medio compás (4 corcheas).
 // - Un hueco de 3+ guiones empieza un grupo nuevo.
 // - Marcas tipo ")x3" a la derecha del bloque lo repiten.
-// - El acorde y los dedos de la mano izquierda se calculan por cada medio compás.
+// - El acorde se calcula por cada medio compás; los dedos, con fingering.js para toda la canción.
 (function (root) {
   const STR = ['E', 'A', 'D', 'G', 'B', 'e'];
   const OPEN = [40, 45, 50, 55, 59, 64];
@@ -50,38 +50,6 @@
       }
     }
     return NOTE[bass] + '?';
-  }
-
-  // Dedos 1–4 para una forma. Una nota por traste, cejilla con el índice si hace falta.
-  function fingerShape(frets) {
-    const fingers = [0, 0, 0, 0, 0, 0];
-    const fretted = [];
-    frets.forEach((f, s) => { if (typeof f === 'number' && f > 0) fretted.push({ s, f }); });
-    if (!fretted.length) return fingers;
-    const minF = Math.min(...fretted.map(n => n.f));
-    const maxF = Math.max(...fretted.map(n => n.f));
-    const atMin = fretted.filter(n => n.f === minF).length;
-    const byFret = [...new Set(fretted.map(n => n.f))].sort((a, b) => a - b);
-    // devuelve dedos o null si hacen falta más de 4
-    function assign(base, barre) {
-      const out = [0, 0, 0, 0, 0, 0];
-      let next = 1;
-      for (const f of byFret) {
-        const ns = fretted.filter(n => n.f === f).sort((a, b) => a.s - b.s);
-        if (f === minF && barre) { ns.forEach(n => out[n.s] = 1); next = 2; continue; }
-        let fg = Math.max(next, Math.min(f - base + 1, 5 - ns.length));
-        for (const n of ns) { if (fg > 4) return null; out[n.s] = fg++; }
-        next = fg;
-      }
-      return out;
-    }
-    const tries = [];
-    if (atMin >= 2 && fretted.length >= 4) tries.push([minF, true]);
-    if (maxF <= 4) tries.push([1, false]);            // primera posición: dedo = traste
-    tries.push([minF, false]);
-    if (atMin >= 2) tries.push([minF, true]);
-    for (const [b, br] of tries) { const r = assign(b, br); if (r) return r; }
-    return fingers;
   }
 
   function parseBlock(lines) {
@@ -155,7 +123,8 @@
     return runs;
   }
 
-  function parseAsciiTab(text) {
+  // opts.fingers: digitaciones fijadas a mano { 'x,5,7,6,7,x': [0,1,3,2,4,0] }
+  function parseAsciiTab(text, opts = {}) {
     const lines = text.split(/\r?\n/);
     const measures = [], chords = {};
     const blocks = [];
@@ -192,7 +161,7 @@
           if (!allOpen && !(prevFrets && fitsShape(run, prevFrets))) {
             const frets = shapeOf(run);
             const key = frets.join(',');
-            if (!chords[key]) chords[key] = { name: nameChord(frets), frets, fingers: fingerShape(frets) };
+            if (!chords[key]) chords[key] = { name: nameChord(frets), frets };
             cur.chords[cur.notes.length] = key;
             prevFrets = frets;
           }
@@ -230,8 +199,20 @@
       }
       m.chords = c;
     });
-    return { measures, chords };
+    // dedos: se eligen en orden para que los cambios entre acordes sean cómodos.
+    // La misma forma puede llevar dedos distintos según de dónde vengas, así que la clave incluye los dedos.
+    const seq = [];
+    measures.forEach(m => Object.keys(m.chords).map(Number).sort((a, b) => a - b).forEach(k => seq.push({ m, k })));
+    const chosen = root.Fingering.optimize(seq.map(x => chords[x.m.chords[x.k]].frets), opts.fingers || {});
+    const out = {};
+    seq.forEach((x, i) => {
+      const base = chords[x.m.chords[x.k]];
+      const key = base.frets.join(',') + '|' + chosen[i].join('');
+      if (!out[key]) out[key] = { name: base.name, frets: base.frets, fingers: chosen[i] };
+      x.m.chords[x.k] = key;
+    });
+    return { measures, chords: out };
   }
 
-  root.TabParser = { parseAsciiTab, nameChord, fingerShape };
+  root.TabParser = { parseAsciiTab, nameChord };
 })(typeof window !== 'undefined' ? window : globalThis);
