@@ -1,0 +1,17 @@
+Guitar Tabs
+Copyright (c) 2026 Fabián Godoy Silvestre
+
+The code in this repository (index.html, tabparser.js, fingering.js and
+songs/index.js) is released under the MIT License (see LICENSE).
+
+The tablatures in songs/ are NOT covered by that license. They transcribe
+songs whose music and lyrics belong to their authors and publishers, and they
+were taken from user submissions on Ultimate Guitar (each file names its
+source in its `notes` field):
+
+  songs/for-lovers.js         "For Lovers", Lamp
+  songs/hisoyakani.js         "密やかに (Hisoyakani)", Lamp
+  songs/out-getting-ribs.js   "Out Getting Ribs", King Krule
+
+They are included only as sample material for the player. If you reuse this
+project, replace them with tablatures you have the right to use.
